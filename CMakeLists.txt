@@ -157,17 +157,65 @@ if(DOWNLOAD_CERTS)
         set(CERT_DOWNLOAD_DIR ${DEMOS_DIR}/certificates)
     endif()
     file(MAKE_DIRECTORY ${CERT_DOWNLOAD_DIR})
-    # Download the Amazon Root CA certificate.
-    message( "Downloading the Amazon Root CA certificate..." )
-    execute_process(
-        COMMAND curl --url https://www.amazontrust.com/repository/AmazonRootCA1.pem
-        -o ${CERT_DOWNLOAD_DIR}/AmazonRootCA1.crt
-    )
+
+    message( "Downloading the Amazon Root CA certificates..." )
+    function(download_certificate CERTIFICATE_URL CERTIFICATE_FILENAME)
+        if(EXISTS ${CERT_DOWNLOAD_DIR}/${CERTIFICATE_FILENAME})
+            file(SIZE ${CERT_DOWNLOAD_DIR}/${CERTIFICATE_FILENAME} FILE_SIZE)
+            if(NOT ${FILE_SIZE} EQUAL 0)
+                message("Skipping ${CERTIFICATE_URL}...")
+                return()
+            endif()
+        endif()
+        # Download if file doesn't exist or is empty
+        message("Downloading ${CERTIFICATE_URL}...")
+        file(DOWNLOAD ${CERTIFICATE_URL} ${CERT_DOWNLOAD_DIR}/${CERTIFICATE_FILENAME})
+    endfunction()
+    download_certificate(https://www.amazontrust.com/repository/AmazonRootCA1.pem AmazonRootCA1.crt)
+    download_certificate(https://www.amazontrust.com/repository/AmazonRootCA2.pem AmazonRootCA2.crt)
+    download_certificate(https://www.amazontrust.com/repository/AmazonRootCA3.pem AmazonRootCA3.crt)
+    download_certificate(https://www.amazontrust.com/repository/AmazonRootCA4.pem AmazonRootCA4.crt)
+    download_certificate(https://www.amazontrust.com/repository/SFSRootCAG2.pem SFSRootCAG2.crt)
+    download_certificate(
+        https://www.websecurity.digicert.com/content/dam/websitesecurity/digitalassets/desktop/pdfs/roots/VeriSign-Class%203-Public-Primary-Certification-Authority-G5.pem
+        PPRootCAG5.crt
+     )
+
+    # Concatenate certificates into one chain so that demos do not
+    # need to choose the correct one when performing a TLS handshake 
+    file(WRITE ${CERT_DOWNLOAD_DIR}/AwsIotRootCaChain.crt "")
+    function(concatenate IN_FILE)
+        file(READ ${CERT_DOWNLOAD_DIR}/${IN_FILE} CONTENTS)
+        file(APPEND ${CERT_DOWNLOAD_DIR}/AwsIotRootCaChain.crt "${CONTENTS}")
+    endfunction()
+    concatenate(AmazonRootCA1.crt)
+    concatenate(AmazonRootCA2.crt)
+    concatenate(AmazonRootCA3.crt)
+    concatenate(AmazonRootCA4.crt)
+    concatenate(SFSRootCAG2.crt)
+    concatenate(PPRootCAG5.crt)
+
+    file(SHA256 ${CERT_DOWNLOAD_DIR}/AwsIotRootCaChain.crt CHAIN_CERT_CHECKSUM)
+    # Calculated by verifying all certificates were successfully downloaded, 
+    # then by `sha256sum < ./demos/certificates/AwsIotRootCaChain.crt`
+    set(EXPECTED_CHAIN_CERT_SHA256 "790d7878f99f07afc5a707ee899432fef7a752d50d7fb9f0782470155026ec46")
+    message("Verifying certificate checksum")
+    if(NOT ${CHAIN_CERT_CHECKSUM} STREQUAL ${EXPECTED_CHAIN_CERT_SHA256}) 
+        message(WARNING "WARNING: Certificate file checksum does not match.")
+        message("Received: ${CHAIN_CERT_CHECKSUM}")
+        message("Expected: ${EXPECTED_CHAIN_CERT_SHA256}")
+    endif()
+
     # Copy certificates to the build directory.
     file(COPY "${CERT_DOWNLOAD_DIR}"
          DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
     if(BUILD_TESTS)
         file(COPY "${CERT_DOWNLOAD_DIR}"
              DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/tests)
+    endif()
+
+    if(NOT ROOT_CA_CERT_PATH)
+        set(ROOT_CA_CERT_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/AwsIotRootCaChain.crt)
+        message(${ROOT_CA_CERT_PATH})
     endif()
 endif()
